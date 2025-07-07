@@ -1,0 +1,364 @@
+"""
+Gnosis Docker - Main Flask Application
+Async Flask server for Docker management via MCP
+"""
+
+import os
+import asyncio
+import json
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
+import docker
+from docker.errors import DockerException, APIError, NotFound
+
+from core.config import Config
+from core.auth import require_auth, local_only
+from core.docker_manager import DockerManager
+from core.utils import async_route, format_container_info, format_image_info
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config.from_object(Config)
+CORS(app, origins=Config.ALLOWED_ORIGINS)
+
+# Initialize Docker manager
+docker_manager = DockerManager()
+
+# Error handlers
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    return jsonify({
+        "error": e.name,
+        "message": e.description,
+        "status": e.code
+    }), e.code
+
+@app.errorhandler(DockerException)
+def handle_docker_exception(e):
+    return jsonify({
+        "error": "Docker Error",
+        "message": str(e),
+        "status": 500
+    }), 500
+
+@app.errorhandler(Exception)
+def handle_generic_exception(e):
+    app.logger.error(f"Unhandled exception: {e}", exc_info=True)
+    return jsonify({
+        "error": "Internal Server Error",
+        "message": "An unexpected error occurred",
+        "status": 500
+    }), 500
+
+# Health check
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        # Check Docker connection
+        docker_manager.client.ping()
+        docker_status = "healthy"
+    except Exception as e:
+        docker_status = f"unhealthy: {str(e)}"
+    
+    return jsonify({
+        "status": "healthy" if docker_status == "healthy" else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "gnosis-docker",
+        "version": "1.0.0",
+        "checks": {
+            "docker": docker_status
+        }
+    })
+
+# Container endpoints
+@app.route('/api/containers', methods=['GET'])
+@local_only
+@async_route
+async def list_containers():
+    """List all containers"""
+    all_containers = request.args.get('all', 'false').lower() == 'true'
+    filters = {}
+    
+    if request.args.get('status'):
+        filters['status'] = request.args.get('status')
+    
+    containers = await docker_manager.list_containers(all=all_containers, filters=filters)
+    return jsonify({
+        "containers": [format_container_info(c) for c in containers],
+        "total": len(containers)
+    })
+
+@app.route('/api/containers/<container_id>', methods=['GET'])
+@local_only
+@async_route
+async def get_container(container_id):
+    """Get container details"""
+    container = await docker_manager.get_container(container_id)
+    if not container:
+        return jsonify({"error": "Container not found"}), 404
+    
+    return jsonify(format_container_info(container, detailed=True))
+
+@app.route('/api/containers/<container_id>/start', methods=['POST'])
+@local_only
+@async_route
+async def start_container(container_id):
+    """Start a container"""
+    success = await docker_manager.start_container(container_id)
+    if success:
+        return jsonify({"message": f"Container {container_id} started successfully"})
+    return jsonify({"error": "Failed to start container"}), 400
+
+@app.route('/api/containers/<container_id>/stop', methods=['POST'])
+@local_only
+@async_route
+async def stop_container(container_id):
+    """Stop a container"""
+    try:
+        timeout = request.json.get('timeout', 10) if request.json else 10
+        success = await docker_manager.stop_container(container_id, timeout=timeout)
+        if success:
+            return jsonify({"message": f"Container {container_id} stopped successfully"})
+        return jsonify({"error": "Failed to stop container"}), 400
+    except Exception as e:
+        app.logger.error(f"Error stopping container {container_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to stop container: {str(e)}"}), 500
+
+
+@app.route('/api/containers/<container_id>/restart', methods=['POST'])
+@local_only
+@async_route
+async def restart_container(container_id):
+    """Restart a container"""
+    timeout = request.json.get('timeout', 10) if request.json else 10
+    success = await docker_manager.restart_container(container_id, timeout=timeout)
+    if success:
+        return jsonify({"message": f"Container {container_id} restarted successfully"})
+    return jsonify({"error": "Failed to restart container"}), 400
+
+@app.route('/api/containers/<container_id>', methods=['DELETE'])
+@local_only
+@async_route
+async def remove_container(container_id):
+    """Remove a container"""
+    force = request.args.get('force', 'false').lower() == 'true'
+    volumes = request.args.get('volumes', 'false').lower() == 'true'
+    
+    success = await docker_manager.remove_container(container_id, force=force, v=volumes)
+    if success:
+        return jsonify({"message": f"Container {container_id} removed successfully"})
+    return jsonify({"error": "Failed to remove container"}), 400
+
+@app.route('/api/containers/<container_id>/logs', methods=['GET'])
+@local_only
+@async_route
+async def get_container_logs(container_id):
+    """Get container logs"""
+    tail = request.args.get('tail', 100)
+    since = request.args.get('since')
+    until = request.args.get('until')
+    timestamps = request.args.get('timestamps', 'false').lower() == 'true'
+    
+    logs = await docker_manager.get_container_logs(
+        container_id, 
+        tail=tail,
+        since=since,
+        until=until,
+        timestamps=timestamps
+    )
+    
+    if logs is None:
+        return jsonify({"error": "Failed to get logs"}), 400
+    
+    return jsonify({
+        "container_id": container_id,
+        "logs": logs
+    })
+
+@app.route('/api/containers/<container_id>/stats', methods=['GET'])
+@local_only
+@async_route
+async def get_container_stats(container_id):
+    """Get container stats"""
+    stats = await docker_manager.get_container_stats(container_id)
+    if stats is None:
+        return jsonify({"error": "Failed to get stats"}), 400
+    
+    return jsonify({
+        "container_id": container_id,
+        "stats": stats
+    })
+
+# Image endpoints
+@app.route('/api/images', methods=['GET'])
+@local_only
+@async_route
+async def list_images():
+    """List all images"""
+    images = await docker_manager.list_images()
+    return jsonify({
+        "images": [format_image_info(img) for img in images],
+        "total": len(images)
+    })
+
+@app.route('/api/images/pull', methods=['POST'])
+@local_only
+@async_route
+async def pull_image():
+    """Pull an image"""
+    data = request.json
+    if not data or 'image' not in data:
+        return jsonify({"error": "Image name required"}), 400
+    
+    image_name = data['image']
+    tag = data.get('tag', 'latest')
+    
+    result = await docker_manager.pull_image(image_name, tag)
+    if result:
+        return jsonify({
+            "message": f"Image {image_name}:{tag} pulled successfully",
+            "image": result
+        })
+    return jsonify({"error": "Failed to pull image"}), 400
+
+@app.route('/api/images/<path:image_id>', methods=['DELETE'])
+@local_only
+@async_route
+async def remove_image(image_id):
+    """Remove an image"""
+    force = request.args.get('force', 'false').lower() == 'true'
+    
+    success = await docker_manager.remove_image(image_id, force=force)
+    if success:
+        return jsonify({"message": f"Image {image_id} removed successfully"})
+    return jsonify({"error": "Failed to remove image"}), 400
+
+# Build endpoints
+@app.route('/api/build', methods=['POST'])
+@local_only
+@async_route
+async def build_project():
+    """Build a Docker image from a project"""
+    try:
+        data = request.json
+        if not data or 'project' not in data:
+            return jsonify({"error": "Project name required"}), 400
+        
+        project_name = data['project']
+        tag = data.get('tag')
+        dockerfile = data.get('dockerfile', 'Dockerfile')
+        
+        # Define host paths for known projects
+        # Docker Desktop on Windows needs Windows paths with backslashes
+        host_projects = {
+            'gnosis-wraith': 'C:\\Users\\kord\\code\\gnosis\\gnosis-wraith',
+            'gnosis-ocr': 'C:\\Users\\kord\\code\\gnosis\\gnosis-ocr',
+            'gnosis-mystic': 'C:\\Users\\kord\\code\\gnosis\\gnosis-mystic',
+            'gnosis-docker': 'C:\\Users\\kord\\code\\gnosis\\gnosis-docker',
+            'gnosis-evolve': 'C:\\Users\\kord\\code\\gnosis\\gnosis-evolve',
+            'gnosis-forge': 'C:\\Users\\kord\\code\\gnosis\\gnosis-forge',
+        }
+
+
+
+
+        
+        if project_name not in host_projects:
+            return jsonify({"error": f"Unknown project: {project_name}"}), 400
+        
+        # Get the host path
+        project_path = host_projects[project_name]
+        tag = tag or f"{project_name}:latest"
+        
+        # Log the path for debugging
+        app.logger.info(f"Building {project_name} from path: {project_path}")
+        
+        # Note: We're passing a HOST filesystem path to Docker daemon
+        # The Docker daemon on the host will access these files directly
+        result = await docker_manager.build_image(project_path, tag, dockerfile)
+
+        if result:
+            return jsonify({
+                "message": "Build completed successfully",
+                "project": project_name,
+                "image": result,
+                "host_path": project_path
+            })
+        return jsonify({"error": "Build failed"}), 400
+    except Exception as e:
+        app.logger.error(f"Build error for project {project_name}: {e}", exc_info=True)
+        return jsonify({"error": f"Build failed: {str(e)}"}), 500
+
+
+
+# Project deployment endpoint
+@app.route('/api/projects/<project_name>/deploy', methods=['POST'])
+@local_only
+@async_route
+async def deploy_project(project_name):
+    """Deploy a specific project (e.g., gnosis-wraith)"""
+    data = request.json or {}
+    target = data.get('target', 'local')
+    
+    # Map project names to paths
+    project_paths = {
+        'gnosis-wraith': os.path.join(os.path.dirname(app.root_path), 'gnosis-wraith'),
+        'gnosis-ocr': os.path.join(os.path.dirname(app.root_path), 'gnosis-ocr'),
+        'gnosis-mystic': os.path.join(os.path.dirname(app.root_path), 'gnosis-mystic'),
+    }
+    
+    if project_name not in project_paths:
+        return jsonify({"error": f"Unknown project: {project_name}"}), 400
+    
+    project_path = project_paths[project_name]
+    if not os.path.exists(project_path):
+        return jsonify({"error": f"Project not found: {project_path}"}), 404
+    
+    # Check for deployment script
+    deploy_script = os.path.join(project_path, 'deploy.ps1')
+    if not os.path.exists(deploy_script):
+        deploy_script = os.path.join(project_path, 'scripts', 'deploy_v2.ps1')
+    
+    if not os.path.exists(deploy_script):
+        return jsonify({"error": "No deployment script found"}), 400
+    
+    # Execute deployment
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', deploy_script,
+            '-Target', target,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=project_path
+        )
+        
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode == 0:
+            return jsonify({
+                "message": f"Project {project_name} deployed successfully",
+                "target": target,
+                "output": stdout.decode('utf-8')
+            })
+        else:
+            return jsonify({
+                "error": "Deployment failed",
+                "stderr": stderr.decode('utf-8')
+            }), 400
+            
+    except Exception as e:
+        return jsonify({"error": f"Deployment error: {str(e)}"}), 500
+
+# Main entry point
+if __name__ == '__main__':
+    # Run the app
+    app.run(
+        host='0.0.0.0',
+        port=Config.PORT,
+        debug=Config.DEBUG
+    )

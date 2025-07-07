@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  gnosis-docker:
+    build: .
+    container_name: gnosis-docker
+    ports:
+      - "5680:5680"
+    environment:
+      - DEBUG=True
+      - PORT=5680
+      - LOCAL_ONLY=False
+
+    volumes:
+      # Mount the Docker socket - this works when running from WSL2
+      - /var/run/docker.sock:/var/run/docker.sock
+      
+      # Mount logs directory
+      - ./logs:/app/logs
+      
+      # Mount gnosis projects directory so we can build from inside container
+      - /mnt/c/Users/kord/code/gnosis:/projects:ro
+
+    restart: unless-stopped
+    networks:
+      - gnosis-network
+
+
+
+  redis:
+    image: redis:7-alpine
+    container_name: gnosis-docker-redis
+    ports:
+      - "6380:6379"
+
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - gnosis-network
+
+networks:
+  gnosis-network:
+    driver: bridge
+
+volumes:
+  redis-data:

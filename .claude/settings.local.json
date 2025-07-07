@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_api_endpoints.py -v)",
+      "Bash(python -m pytest tests/test_validation.py tests/test_container_creation.py tests/test_api_endpoints.py -v)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/test_validation.py tests/test_container_creation.py tests/test_api_endpoints.py --tb=short)",
+      "Bash(curl:*)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_service_health -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_create_container_basic -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_run_container_detached -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_create_container_validation_error -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_container_lifecycle -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py::TestGnosisDockerIntegration::test_get_container_logs -v -s)",
+      "Bash(python -m pytest tests/test_real_integration.py -v --tb=short)"
+    ],
+    "deny": []
+  }
+}

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  gnosis-docker:
+    build: .
+    container_name: gnosis-docker
+    ports:
+      - "5680:5680"
+    environment:
+      - DEBUG=True
+      - PORT=5680
+      - LOCAL_ONLY=True
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      # THIS IS THE KEY: Mount the Docker socket from host into container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Note: We do NOT need to mount project directories
+      # The Docker daemon on the host accesses files directly
+      - ./logs:/app/logs
+
+    restart: unless-stopped
+    networks:
+      - gnosis-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: gnosis-docker-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - gnosis-network
+
+networks:
+  gnosis-network:
+    driver: bridge
+
+volumes:
+  redis-data:
