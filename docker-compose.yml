@@ -19,7 +19,8 @@ services:
       - ./logs:/app/logs
       
       # Mount gnosis projects directory so we can build from inside container
-      - /mnt/c/Users/kord/code/gnosis:/projects:ro
+      - /mnt/c/Users/kord/Code/gnosis:/projects:ro
+
 
     restart: unless-stopped
     networks:

@@ -35,13 +35,36 @@ Simple example demonstrating MCP patterns:
 ### Windows Requirements
 - **Python 3.8+** installed and in PATH
 - **Claude Code** v1.0.24+ or **Claude Desktop** v1.0+
+- **Docker Desktop** with WSL2 backend (recommended)
 - **Gnosis Docker** running on `localhost:5680`
 
-### WSL2 Requirements
-- **WSL2** with Ubuntu/Debian
+### WSL2 Requirements (Recommended)
+- **WSL2** with Ubuntu/Debian distribution
 - **Python 3.8+** (`sudo apt install python3 python3-pip`)
 - **Claude Code** v1.0.24+
-- **Gnosis Docker** accessible from WSL
+- **Docker Desktop** with WSL2 integration enabled
+- **Gnosis Docker** accessible from WSL via Docker socket
+
+### Docker Setup Requirements
+Before using these MCP tools, ensure Gnosis Docker is properly configured:
+
+#### WSL2 Setup (Recommended)
+1. Install WSL2: `wsl --install` (as Administrator)
+2. Install Docker Desktop with WSL2 backend
+3. Enable WSL2 integration in Docker Desktop settings
+4. Verify Docker socket access in WSL2:
+   ```bash
+   ls -la /var/run/docker.sock
+   docker version
+   ```
+
+#### Windows Setup (Alternative)
+1. Enable Docker Desktop TCP endpoint (Settings → General → "Expose daemon")
+2. Set environment variable: `$env:DOCKER_HOST = "tcp://localhost:2375"`
+3. Run setup script: `.\setup-docker-desktop.ps1`
+
+The Docker socket communication is essential for Gnosis Docker to manage containers and for these MCP tools to function properly.
+
 
 ## Installation
 
@@ -123,7 +146,8 @@ Create `.mcp.json` in your project root:
 
 Edit your Claude Desktop configuration file:
 
-**Windows:** `C:\\Users\\kord\\AppData\\Roaming\\Claude\\claude_desktop_config.json`
+**Windows:** `C:\Users\kord\AppData\Roaming\Claude\claude_desktop_config.json`
+
 
 **WSL2:** Access the Windows config file from WSL:
 ```bash
@@ -153,6 +177,7 @@ Add to the `mcpServers` section:
         "C:\\Users\\kord\\Code\\gnosis\\gnosis-docker\\mcp\\example_utilities_mcp.py"
       ]
     }
+
   }
 }
 ```

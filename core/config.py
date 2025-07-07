@@ -35,7 +35,8 @@ class Config:
     BLOCKED_IMAGES = os.getenv('BLOCKED_IMAGES', '').split(',') if os.getenv('BLOCKED_IMAGES') else []
     MAX_MEMORY = os.getenv('MAX_MEMORY', '1g')
     MAX_CPUS = float(os.getenv('MAX_CPUS', '2.0'))
-    ALLOWED_VOLUME_PATHS = os.getenv('ALLOWED_VOLUME_PATHS', '/tmp,/data,/app,/mnt/c/Users/kord/Code/gnosis,/projects').split(',')
+    ALLOWED_VOLUME_PATHS = os.getenv('ALLOWED_VOLUME_PATHS', '/tmp,/data,/app,/mnt/c/Users/kord/Code/gnosis,/projects,C:\\Users\\kord\\Code\\gnosis').split(',')
+
     BLOCK_PRIVILEGED = os.getenv('BLOCK_PRIVILEGED', 'True').lower() == 'true'
     
     @classmethod

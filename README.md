@@ -1,6 +1,6 @@
 # Gnosis Docker
 
-A Flask async server that exposes Docker management endpoints for MCP (Model Context Protocol) integration with Claude Desktop and Claude Code.
+A Flask async server that exposes Docker management endpoints for MCP (Model Context Protocol) integration with Claude Desktop and Claude Code. This server communicates with the Docker daemon via Docker socket mounting, enabling comprehensive container management through AI assistants.
 
 ## Features
 
@@ -13,6 +13,66 @@ A Flask async server that exposes Docker management endpoints for MCP (Model Con
 - Security middleware for local-only access
 - **MCP tools for AI assistant integration**
 
+## Prerequisites and Setup
+
+### Windows with WSL2 (Recommended)
+
+Gnosis Docker works best on Windows using WSL2 with Docker Desktop, as it provides native Docker socket access:
+
+#### 1. Install WSL2
+```powershell
+# Run as Administrator in PowerShell
+wsl --install
+# Restart your computer
+```
+
+#### 2. Install Docker Desktop
+- Download Docker Desktop from https://www.docker.com/products/docker-desktop/
+- During installation, ensure "Use WSL 2 based engine" is selected
+- Start Docker Desktop
+
+#### 3. Configure Docker Desktop for WSL2
+```powershell
+# Run the setup helper script
+.\setup-docker-desktop.ps1
+```
+
+Or manually configure:
+1. Open Docker Desktop Settings
+2. Go to **General** tab → Enable "Use WSL 2 based engine"
+3. Go to **Resources** → **WSL Integration** → Enable integration with your WSL2 distro
+4. **Optional for development**: In **General** tab → Enable "Expose daemon on tcp://localhost:2375 without TLS"
+5. Click **Apply & Restart**
+
+#### 4. Verify Docker Socket Access
+In WSL2:
+```bash
+# Check if Docker socket is accessible
+ls -la /var/run/docker.sock
+# Should show: srw-rw---- 1 root docker 0 [date] /var/run/docker.sock
+
+# Test Docker connection
+docker version
+```
+
+### Windows without WSL2 (Limited)
+
+For development without WSL2, you can use Docker Desktop's TCP endpoint:
+
+1. Enable TCP endpoint in Docker Desktop (Settings → General → "Expose daemon on tcp://localhost:2375")
+2. Set environment variable: `$env:DOCKER_HOST = "tcp://localhost:2375"`
+3. Run: `.\setup-docker-desktop.ps1` to verify setup
+
+**Note**: This method has limitations and security considerations. WSL2 is strongly recommended.
+
+### Docker Socket Communication
+
+Gnosis Docker uses Docker socket mounting to communicate with the Docker daemon:
+- **WSL2**: Uses Unix socket `/var/run/docker.sock` (mounted into containers)
+- **TCP**: Uses `tcp://localhost:2375` (for development only)
+- **Security**: The server validates all container operations and mounts
+
+
 ## Directory Structure
 
 ```
@@ -20,17 +80,21 @@ gnosis-docker/
 ├── deploy.ps1              # Single deployment script for all environments
 ├── deploy-wsl2.sh          # WSL2 deployment script
 ├── requirements.txt        # Python dependencies
+├── setup.ps1               # Initial setup script
+├── setup-docker-desktop.ps1 # Docker Desktop configuration helper
 ├── Dockerfile             # Docker configuration
 ├── docker-compose.yml     # Local development with Redis
 ├── .env.example           # Environment variable template
 ├── .gitignore            # Git ignore file
 ├── README.md             # This file
+├── WSL2_README.md        # WSL2-specific documentation
 ├── app.py                # Main Flask application
 ├── core/                 # Core application modules
 │   ├── __init__.py
 │   ├── docker_manager.py  # Docker operations handler
 │   ├── auth.py           # Authentication middleware
 │   ├── config.py         # Configuration management
+│   ├── validation.py     # Container security validation
 │   └── utils.py          # Utility functions
 ├── tests/                # Test suite
 │   ├── __init__.py
@@ -45,34 +109,44 @@ gnosis-docker/
 └── cleanup_*.py|ps1|sh   # Repository cleanup scripts
 ```
 
+
 ## Quick Start
 
 ### Deploy the Docker API Server
 
+#### Windows WSL2 (Recommended)
+```bash
+# From WSL2 terminal
+cd /mnt/c/Users/kord/Code/gnosis/gnosis-docker
+
+# Make scripts executable
+chmod +x deploy-wsl2.sh
+
+# Deploy locally
+./deploy-wsl2.sh
+```
+
+#### Windows PowerShell
 ```powershell
+# Initial setup (run once)
+.\setup.ps1
+
 # Windows - Deploy locally
-.\\deploy.ps1 -Target local
+.\deploy.ps1 -Target local
 
 # Windows - Deploy to staging
-.\\deploy.ps1 -Target staging
+.\deploy.ps1 -Target staging
 
 # Windows - Deploy to production
-.\\deploy.ps1 -Target production
+.\deploy.ps1 -Target production
 
 # Windows - Rebuild from scratch
-.\\deploy.ps1 -Target local -Rebuild
+.\deploy.ps1 -Target local -Rebuild
 
 # Windows - Dry run (see what would happen)
-.\\deploy.ps1 -Target production -WhatIf
+.\deploy.ps1 -Target production -WhatIf
 ```
 
-```bash
-# WSL2 - Deploy locally
-./deploy-wsl2.sh local
-
-# WSL2 - Deploy to staging
-./deploy-wsl2.sh staging
-```
 
 ### Use MCP Tools with AI Assistants
 
@@ -157,11 +231,12 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "gnosis-docker-mcp": {
       "command": "python",
-      "args": ["C:\\\\path\\\\to\\\\gnosis-docker\\\\mcp\\\\gnosis_docker_mcp.py"]
+      "args": ["C:\\path\\to\\gnosis-docker\\mcp\\gnosis_docker_mcp.py"]
     }
   }
 }
 ```
+
 
 ## Repository Maintenance
 
@@ -174,7 +249,8 @@ This repository includes cleanup scripts to remove unwanted versioning directori
 python cleanup_comprehensive.py
 
 # PowerShell script (Windows)
-.\\cleanup_comprehensive.ps1
+.\cleanup_comprehensive.ps1
+
 
 # Bash script (Linux/WSL2)
 ./cleanup_quick.sh
@@ -189,7 +265,8 @@ These scripts will remove:
 ## Environment Variables
 
 - `FLASK_ENV` - Environment (development/staging/production)
-- `DOCKER_HOST` - Docker daemon URL (default: unix:///var/run/docker.sock)
+- `DOCKER_HOST` - Docker daemon URL (default: unix:///var/run/docker.sock, or tcp://localhost:2375 for Windows)
+
 - `API_KEY` - Authentication key for production
 - `REDIS_URL` - Redis URL for caching (optional)
 - `GNOSIS_DOCKER_URL` - API endpoint URL (default: http://localhost:5680)
@@ -199,8 +276,11 @@ These scripts will remove:
 - **Local-only access** by default (binds to 127.0.0.1)
 - **API key authentication** for production deployments
 - **Request validation** and sanitization
-- **Docker socket security** with proper permissions
+- **Docker socket security** with proper permissions and validation
 - **CORS protection** for web interfaces
+- **Container parameter validation** prevents dangerous operations
+- **Volume mount restrictions** limit filesystem access
+
 
 ## Development
 
@@ -210,8 +290,12 @@ These scripts will remove:
 # Install dependencies
 pip install -r requirements.txt
 
+# Or use setup script
+.\setup.ps1
+
 # Run in development mode
 python app.py
+
 
 # Run tests
 python -m pytest tests/
@@ -226,8 +310,12 @@ python test_api.py
 # Build container
 docker build -t gnosis-docker .
 
+# Or use deployment script
+.\deploy.ps1 -Target local
+
 # Run with Docker Compose
 docker-compose up -d
+
 
 # View logs
 docker-compose logs -f gnosis-docker
@@ -272,20 +360,45 @@ curl -X POST http://localhost:5680/api/build \
 
 ### Common Issues
 
-1. **Docker daemon not accessible**
+1. **Docker daemon not accessible in WSL2**
    - Check Docker Desktop is running
-   - Verify Docker socket permissions
-   - Check `DOCKER_HOST` environment variable
+   - Verify WSL2 integration is enabled in Docker Desktop
+   - Check Docker socket exists: `ls -la /var/run/docker.sock`
+   - Restart Docker Desktop and try again
 
-2. **Port 5680 already in use**
+2. **Docker daemon not accessible on Windows**
+   - Ensure Docker Desktop is running
+   - Check if TCP endpoint is enabled (Settings → General)
+   - Verify `DOCKER_HOST` environment variable
+   - Try running: `.\setup-docker-desktop.ps1`
+
+3. **"Cannot connect to Docker daemon" errors**
+   - WSL2: Check that Docker socket is mounted: `docker version`
+   - Windows: Verify TCP endpoint: `curl http://localhost:2375/version`
+   - Check firewall settings
+   - Ensure Docker Desktop has started completely
+
+4. **Container fails to start**
+   - Check Docker logs: `docker-compose logs gnosis-docker`
+   - Verify port 5680 is not in use: `netstat -an | findstr 5680`
+   - Check volume mounts in docker-compose.yml
+
+5. **Port 5680 already in use**
    - Stop existing instances
    - Change port in deployment scripts
    - Check for conflicting services
 
-3. **MCP tools not connecting**
+6. **MCP tools not connecting**
    - Verify API server is running on localhost:5680
    - Check firewall settings
    - Ensure MCP dependencies are installed
+
+7. **Path issues with double slashes**
+   - Use single backslashes in Windows paths
+   - WSL2 paths should use `/mnt/c/` prefix
+   - Docker-compose uses Linux-style paths inside containers
+   - Check docker-compose.yml volume mappings
+
 
 ### Logs and Debugging
 
@@ -294,11 +407,17 @@ curl -X POST http://localhost:5680/api/build \
 docker-compose logs gnosis-docker
 
 # Enable debug logging
-export FLASK_ENV=development
+export FLASK_ENV=development  # WSL2
+$env:FLASK_ENV = "development"  # PowerShell
 python app.py
 
 # Test API health
 curl http://localhost:5680/health
+
+# Test Docker socket access (WSL2)
+docker version
+ls -la /var/run/docker.sock
+
 ```
 
 ## Contributing
